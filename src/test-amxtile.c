@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <assert.h>
+#include <stddef.h>
 
 #define MAX 1024
 #define MAX_ROWS 16
@@ -157,7 +158,7 @@ static void print_buffer32(uint32_t* buf, uint32_t rows, uint32_t colsb)
 }
 
 /* Naive matmul uint16_t matmul w/ zero extension to uint32_t */
-static void matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int A_cols, int B_cols)
+static void naive_matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int A_cols, int B_cols)
 {
   for (int i = 0; i < A_rows; i++) {
     for (int j = 0; j < B_cols; j++) {
@@ -173,6 +174,24 @@ static void matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int A_cols
   }
 } 
 
+/**
+ * For the purposes of accelerating LibSWIFFT, we are working under Z_257. This means
+ * that to represent the full range of values 0-256, we need at least 9 bits of precision.
+ * 
+ * This function splits a uint16_t array into two separate uint8_t arrays, one containing
+ * the low 5 bits and the other containing the high 4 bits of each element. For which these
+ * arrays can be operated on seperately, and later rejoined into a single integer.
+ */
+void bit_split(const uint16_t *input, uint8_t *low_bits, uint8_t *high_bits, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+
+        // Extract the low 5 bits (bits 0-4)
+        low_bits[i] = input[i] & 0x1F; // 0x1F = 00011111 in binary
+        
+        // Extract the next 4 bits (bits 5-8)
+        high_bits[i] = (input[i] >> 5) & 0x0F; // 0x0F = 00001111 in binary
+    }
+}
 
 int main(){
 
@@ -203,7 +222,16 @@ int main(){
   ensure_correct_range(src1_16, MAX);
   ensure_correct_range(src2_16, MAX);
 
-  
+  // uint8_t arrays for low 5 bits and high 4 bits of input buffers
+  uint8_t src1_low_bits[MAX];
+  uint8_t src1_high_bits[MAX];
+  uint8_t src2_low_bits[MAX];
+  uint8_t src2_high_bits[MAX];
+
+  // Split input buffers into low and high bits
+  bit_split(src1_16, src1_low_bits, src1_high_bits, MAX);
+  bit_split(src2_16, src2_low_bits, src2_high_bits, MAX);
+
   // Print input buffers
   printf("Input Buffer 1:\n");
   print_buffer16(src1_16, rows, colsb);
@@ -215,12 +243,11 @@ int main(){
   init_buffer32(amx_res_32, 0);
 
   // Perform naive matmul
-  matmul(src1_16, src2_16, naive_res_32, rows, colsb, colsb);
+  naive_matmul(src1_16, src2_16, naive_res_32, rows, colsb, colsb);
 
   // Print naive result
   printf("Naive Result:\n");
   print_buffer32(naive_res_32, rows, colsb/4);
-
 
   //  // Load tile rows from memory
   //  _tile_loadd (2, src1, STRIDE);
