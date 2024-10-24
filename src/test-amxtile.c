@@ -10,6 +10,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <time.h>
 
 #define MAX 1024
 #define MAX_ROWS 16
@@ -66,6 +67,15 @@ static void init_buffer (uint8_t *buf, uint8_t value)
     }
 }
 
+/* Initialize random uint16_t buffer */
+static void init_random_buffer16(uint16_t *buf, uint32_t size)
+{
+  for (uint32_t i = 0; i < size; i++)
+  {
+    buf[i] = rand() % 256; // Random values between 0 and 255
+  }
+}
+
 /* Initialize uint32_t buffer */
 static void init_buffer32 (uint32_t *buf, uint32_t value)
 {
@@ -99,7 +109,20 @@ static bool set_tiledata_use()
 }
 
 /* Print uint8_t buffer */
-static void print_buffer(uint8_t* buf, uint32_t rows, uint32_t colsb) 
+static void print_buffer8(uint8_t* buf, uint32_t rows, uint32_t colsb) 
+{
+   for (int i = 0; i < rows; i++) {
+     for (int j = 0; j < (colsb); j++)
+     {
+         printf("%d ", buf[i * colsb + j]);
+     }
+     printf("\n");
+   }
+   printf("\n");
+}
+
+/* Print uint16_t buffer */
+static void print_buffer16(uint16_t* buf, uint32_t rows, uint32_t colsb) 
 {
    for (int i = 0; i < rows; i++) {
      for (int j = 0; j < (colsb); j++)
@@ -126,41 +149,50 @@ static void print_buffer32(uint32_t* buf, uint32_t rows, uint32_t colsb)
 
 int main(){
 
-   __tilecfg tile_data = {0};
-   uint8_t src1[MAX];
-   uint8_t src2[MAX];
-   uint32_t res[MAX/4];
-   int rows  = MAX_ROWS;
-   int colsb = MAX_COLS;
+  // seed random input
+  srand(time(NULL));
 
-   // Request permission to linux kernel to run AMX 
-   if (!set_tiledata_use())
-      exit(-1);
+  // tile configuration and metadata
+  __tilecfg tile_data = {0};
+  int rows  = MAX_ROWS;
+  int colsb = MAX_COLS;
 
-   // Load tile configuration 
-   init_tile_config (&tile_data);
+  // Request permission to linux kernel to run AMX 
+  if (!set_tiledata_use())
+    exit(-1);
 
-   // Init src matrix buffers with data
-   init_buffer (src1, 2);
-   print_buffer(src1, rows, colsb);
- 
-   init_buffer (src2, 2);
-   print_buffer(src2, rows, colsb);
+  // Load tile configuration 
+  init_tile_config (&tile_data);
 
-   // Init dst matrix buffers with data
-   init_buffer32 (res, 0);
+  // two uint16_t src buffers
+  uint16_t src1_16[MAX];
+  uint16_t src2_16[MAX];
+  uint32_t res_32[MAX/4];
 
-   // Load tile rows from memory
-   _tile_loadd (2, src1, STRIDE);
-   _tile_loadd (3, src2, STRIDE);
-   _tile_loadd (1, res, STRIDE);
+  // Init random int16_t buffers
+  init_random_buffer16(src1_16, MAX);
+  init_random_buffer16(src2_16, MAX);
+  
+  // Print input buffers
+  printf("Input Buffer 1:\n");
+  print_buffer16(src1_16, rows, colsb);
+  printf("Input Buffer 2:\n");
+  print_buffer16(src2_16, rows, colsb);
 
-   // Compute dot-product of bytes in tiles 
-   _tile_dpbuud (1, 2, 3);
+  // init 32-bit result buffer
+  init_buffer32(res_32, 0);
 
-   // Store the tile data to memory
-   _tile_stored (1, res, STRIDE);
-   print_buffer32(res, rows, colsb/4);
+  //  // Load tile rows from memory
+  //  _tile_loadd (2, src1, STRIDE);
+  //  _tile_loadd (3, src2, STRIDE);
+  //  _tile_loadd (1, res, STRIDE);
+
+  //  // Compute dot-product of bytes in tiles 
+  //  _tile_dpbuud (1, 2, 3);
+
+  //  // Store the tile data to memory
+  //  _tile_stored (1, res, STRIDE);
+  //  print_buffer32(res, rows, colsb/4);
 
    // Release the tile configuration to return to the init state, 
    // which releases all storage it currently holds
