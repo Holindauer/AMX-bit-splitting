@@ -186,17 +186,17 @@ static void naive_matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int 
  * that to represent the full range of values 0-256, we need at least 9 bits of precision.
  * 
  * This function splits a uint16_t array into two separate uint8_t arrays, one containing
- * the low 5 bits and the other containing the high 4 bits of each element. For which these
+ * the low 8 bits and the other containing the high 1 bit of each element. For which these
  * arrays can be operated on seperately, and later rejoined into a single integer.
  */
 void bit_split(const uint16_t *input, uint8_t *low_bits, uint8_t *high_bits, size_t length) {
     for (size_t i = 0; i < length; ++i) {
 
-        // Extract the low 5 bits (bits 0-4)
-        low_bits[i] = input[i] & 0x1F; // 0x1F = 00011111 in binary
+        // Extract the low 8 bits (bits 0-7)
+        low_bits[i] = input[i] & 0xFF; // 0xFF = 11111111 in binary
         
-        // Extract the next 4 bits (bits 5-8)
-        high_bits[i] = (input[i] >> 5) & 0x0F; // 0x0F = 00001111 in binary
+        // Extract the high 1 bits (bit 9)
+        high_bits[i] = (input[i] >> 8) & 0x01; // 0x01 = 00000001 in binary 
     }
 }
 
@@ -218,8 +218,8 @@ void bit_recombine(const uint32_t *low_bits, const uint32_t *high_bits, uint32_t
     memset(output_temp_64, 0, sizeof(output_temp_64));
 
     for (size_t i = 0; i < length; ++i) {
-        // Shift the high bits left by 5 and add the low bits
-        output_temp_64[i] = (high_bits[i] << 5) | low_bits[i];
+        // Shift the high bits left by 8 and add the low bits
+        output_temp_64[i] = (high_bits[i] << 8) | low_bits[i];
     }
 
     // Cast back to uint32_t
@@ -317,8 +317,8 @@ int main(){
     bit_recombine(amx_res_32_low_bits, amx_res_32_high_bits, final_result, MAX/4);
 
     // mmodular reduction
-    // modular_reduction(final_result, 257, MAX/4);
-    // modular_reduction(naive_res_32, 257, MAX/4);
+    modular_reduction(final_result, 257, MAX/4);
+    modular_reduction(naive_res_32, 257, MAX/4);
 
     // print results
     printf("Naive Result:\n");
