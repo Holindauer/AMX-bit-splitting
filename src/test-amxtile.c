@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
+#include <assert.h>
 
 #define MAX 1024
 #define MAX_ROWS 16
@@ -73,6 +74,14 @@ static void init_random_buffer16(uint16_t *buf, uint32_t size)
   for (uint32_t i = 0; i < size; i++)
   {
     buf[i] = rand() % 256; // Random values between 0 and 255
+  }
+}
+
+/* Ensures values are within Z_257*/
+static void ensure_correct_range(uint16_t *buf, uint32_t size)
+{
+  for (uint32_t i = 0; i < size; i++){
+    assert(buf[i] <= 256);
   }
 }
 
@@ -147,6 +156,24 @@ static void print_buffer32(uint32_t* buf, uint32_t rows, uint32_t colsb)
    printf("\n");
 }
 
+/* Naive matmul uint16_t matmul w/ zero extension to uint32_t */
+static void matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int A_cols, int B_cols)
+{
+  for (int i = 0; i < A_rows; i++) {
+    for (int j = 0; j < B_cols; j++) {
+
+      // zero if not already initialized
+      c[i * B_cols + j] = 0;
+
+      for (int k = 0; k < A_cols; k++){
+        // zero extend mul args from 16->32
+        c[i * B_cols + j] += (uint32_t)A[i * A_cols + k] * (uint32_t)B[k * B_cols + j];
+      }
+    }
+  }
+} 
+
+
 int main(){
 
   // seed random input
@@ -167,11 +194,15 @@ int main(){
   // two uint16_t src buffers
   uint16_t src1_16[MAX];
   uint16_t src2_16[MAX];
-  uint32_t res_32[MAX/4];
+  uint32_t amx_res_32[MAX/4];
+  uint32_t naive_res_32[MAX/4];
 
   // Init random int16_t buffers
   init_random_buffer16(src1_16, MAX);
   init_random_buffer16(src2_16, MAX);
+  ensure_correct_range(src1_16, MAX);
+  ensure_correct_range(src2_16, MAX);
+
   
   // Print input buffers
   printf("Input Buffer 1:\n");
@@ -179,8 +210,17 @@ int main(){
   printf("Input Buffer 2:\n");
   print_buffer16(src2_16, rows, colsb);
 
-  // init 32-bit result buffer
-  init_buffer32(res_32, 0);
+  // init 32-bit result buffers
+  init_buffer32(naive_res_32, 0); 
+  init_buffer32(amx_res_32, 0);
+
+  // Perform naive matmul
+  matmul(src1_16, src2_16, naive_res_32, rows, colsb, colsb);
+
+  // Print naive result
+  printf("Naive Result:\n");
+  print_buffer32(naive_res_32, rows, colsb/4);
+
 
   //  // Load tile rows from memory
   //  _tile_loadd (2, src1, STRIDE);
