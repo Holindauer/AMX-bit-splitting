@@ -52,8 +52,8 @@ static void init_tile_config (__tilecfg *tileinfo)
   _tile_loadconfig (tileinfo);
 }
 
-/* Initialize int8_t buffer */
-static void init_buffer (int8_t *buf, int8_t value)
+/* Initialize uint8_t buffer */
+static void init_buffer (uint8_t *buf, uint8_t value)
 {
   int rows, colsb, i, j;
   rows  = MAX_ROWS;
@@ -66,8 +66,8 @@ static void init_buffer (int8_t *buf, int8_t value)
     }
 }
 
-/* Initialize int32_t buffer */
-static void init_buffer32 (int32_t *buf, int32_t value)
+/* Initialize uint32_t buffer */
+static void init_buffer32 (uint32_t *buf, uint32_t value)
 {
   int rows, colsb, i, j;
   rows  = MAX_ROWS;
@@ -98,8 +98,8 @@ static bool set_tiledata_use()
    return true;
 }
 
-/* Print int8_t buffer */
-static void print_buffer(int8_t* buf, int32_t rows, int32_t colsb) 
+/* Print uint8_t buffer */
+static void print_buffer(uint8_t* buf, uint32_t rows, uint32_t colsb) 
 {
    for (int i = 0; i < rows; i++) {
      for (int j = 0; j < (colsb); j++)
@@ -111,8 +111,8 @@ static void print_buffer(int8_t* buf, int32_t rows, int32_t colsb)
    printf("\n");
 }
 
-/* Print int32_t buffer */
-static void print_buffer32(int32_t* buf, int32_t rows, int32_t colsb)
+/* Print uint32_t buffer */
+static void print_buffer32(uint32_t* buf, uint32_t rows, uint32_t colsb)
 {
    for (int i = 0; i < rows; i++) {
      for (int j = 0; j < (colsb); j++)
@@ -127,9 +127,9 @@ static void print_buffer32(int32_t* buf, int32_t rows, int32_t colsb)
 int main(){
 
    __tilecfg tile_data = {0};
-   int8_t src1[MAX];
-   int8_t src2[MAX];
-   int32_t res[MAX/4];
+   uint8_t src1[MAX];
+   uint8_t src2[MAX];
+   uint32_t res[MAX/4];
    int rows  = MAX_ROWS;
    int colsb = MAX_COLS;
 
@@ -156,7 +156,7 @@ int main(){
    _tile_loadd (1, res, STRIDE);
 
    // Compute dot-product of bytes in tiles 
-   _tile_dpbssd (1, 2, 3);
+   _tile_dpbuud (1, 2, 3);
 
    // Store the tile data to memory
    _tile_stored (1, res, STRIDE);
