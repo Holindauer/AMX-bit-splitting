@@ -75,7 +75,7 @@ static void init_random_buffer16(uint16_t *buf, uint32_t size)
 {
   for (uint32_t i = 0; i < size; i++)
   {
-    buf[i] = rand() % 256; // Random values between 0 and 255
+    buf[i] = rand() % 257; // Random values between 0 and 257
   }
 }
 
@@ -189,14 +189,14 @@ static void naive_matmul(uint16_t *A, uint16_t *B, uint32_t *c, int A_rows, int 
  * the low 8 bits and the other containing the high 1 bit of each element. For which these
  * arrays can be operated on seperately, and later rejoined into a single integer.
  */
-void bit_split(const uint16_t *input, uint8_t *low_bits, uint8_t *high_bits, size_t length) {
+inline void bit_split(const uint16_t *input, uint8_t *low_bits, uint8_t *high_bits, size_t length) {
     for (size_t i = 0; i < length; ++i) {
 
         // Extract the low 8 bits (bits 0-7)
         low_bits[i] = input[i] & 0xFF; // 0xFF = 11111111 in binary
         
         // Extract the high 1 bits (bit 9)
-        high_bits[i] = (input[i] >> 8) & 0x01; // 0x01 = 00000001 in binary 
+        high_bits[i] = (input[i] >> 8) & 0xFF; // or 0x01 potentially
     }
 }
 
@@ -211,7 +211,7 @@ void bit_split(const uint16_t *input, uint8_t *low_bits, uint8_t *high_bits, siz
  * Thsi function accepts the two int32_t AMX matmul results for low and high bits, and recombines
  * them by bit-shifting the 1 high bit left by 8 and adding the low bits with an OR operation.
  */
-void bit_recombine(const uint32_t *low_bits, const uint32_t *high_bits, uint32_t *output, size_t length) {
+inline void bit_recombine(const uint32_t *low_bits, const uint32_t *high_bits, uint32_t *output, size_t length) {
 
     // create uint64_t output to avoid overflow
     uint64_t output_temp_64[256] = {0};
@@ -228,11 +228,34 @@ void bit_recombine(const uint32_t *low_bits, const uint32_t *high_bits, uint32_t
     }
 }
 
-void modular_reduction(uint32_t *buf, uint32_t modulus, size_t length) {
+/* Performs matmul w/ amxtile for uint8_t arrays */
+inline void amx_matmul(const uint8_t *src1, const uint8_t *src2, uint32_t *res, size_t length) {
+    
+    // Load data into AMX tiles from memory
+    _tile_loadd (2, src1, STRIDE);
+    _tile_loadd (3, src2, STRIDE);
+    _tile_loadd (1, res, STRIDE);
+
+    // Compute dot-product of bytes in tiles 
+    _tile_dpbuud (1, 2, 3);
+
+    // Store tile data to memory
+    _tile_stored (1, res, STRIDE);
+}
+
+/* Left shifts all values in uint32_t buffer */
+inline void left_shift_buffer32(uint32_t *buf, size_t length, int shift) {
     for (size_t i = 0; i < length; ++i) {
-        buf[i] %= modulus;
+        buf[i] <<= shift;
     }
 }
+
+/* 32-bit buffer addition */
+inline void add_buffer32(uint32_t *buf1, uint32_t *buf2, uint32_t *res, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        res[i] = buf1[i] + buf2[i];
+    }
+} 
 
 /**
  * performs matmul of two int16_t buffers representing 16x64 by 64x16 matrices 
@@ -244,50 +267,55 @@ void modular_reduction(uint32_t *buf, uint32_t modulus, size_t length) {
  * All argument buffers must be pre-initialized, w/ the output buffer containing
  * all 0s.
  */
-void bit_split_amx_matmul_int16_t(const int16_t* src1, const int16_t*  src2, uint32_t* res, size_t length) {
+inline void bit_split_amx_matmul_int16_t(const int16_t* src1, const int16_t*  src2, uint32_t* res, size_t length) {
 
-    // uint8_t arrays for low 5 bits and high 4 bits of input buffers
-    uint8_t src1_low_bits[MAX] __attribute__((aligned(64)));
-    uint8_t src1_high_bits[MAX] __attribute__((aligned(64)));
-    uint8_t src2_low_bits[MAX] __attribute__((aligned(64)));
-    uint8_t src2_high_bits[MAX] __attribute__((aligned(64)));  
+    // mem for split buffers
+    uint8_t src1_hi[MAX] __attribute__((aligned(64))); // A
+    uint8_t src1_lo[MAX] __attribute__((aligned(64))); // B
+    uint8_t src2_hi[MAX] __attribute__((aligned(64))); // C
+    uint8_t src2_lo[MAX] __attribute__((aligned(64))); // D
 
-    // init 32-bit result buffers for low and high bits
-    uint32_t amx_res_32_low_bits[MAX/4] __attribute__((aligned(64)));
-    uint32_t amx_res_32_high_bits[MAX/4] __attribute__((aligned(64)));
-    init_buffer32(amx_res_32_low_bits, 0);  
-    init_buffer32(amx_res_32_high_bits, 0);
+    // Split into low and high bits
+    bit_split(src1, src1_lo, src1_hi, MAX);
+    bit_split(src2, src2_lo, src2_hi, MAX);
 
-    // Split input buffers into low and high bits
-    bit_split(src1, src1_low_bits, src1_high_bits, MAX);
-    bit_split(src2, src2_low_bits, src2_high_bits, MAX);
+    // init mem for products
+    uint32_t AC[MAX/4] __attribute__((aligned(64)));
+    uint32_t AD[MAX/4] __attribute__((aligned(64)));
+    uint32_t BC[MAX/4] __attribute__((aligned(64)));
+    uint32_t BD[MAX/4] __attribute__((aligned(64)));
+    memset(AC, 0, sizeof(AC));
+    memset(AD, 0, sizeof(AD));
+    memset(BC, 0, sizeof(BC));
+    memset(BD, 0, sizeof(BD));
 
-    // Load low bit data into AMX tiles from memory
-    _tile_loadd (2, src1_low_bits, STRIDE);
-    _tile_loadd (3, src2_low_bits, STRIDE);
-    _tile_loadd (1, amx_res_32_low_bits, STRIDE);
+    // compute AC, AD, BC, BD
+    amx_matmul(src1_hi, src2_hi, AC, MAX); // A * C
+    amx_matmul(src1_hi, src2_lo, AD, MAX); // A * D
+    amx_matmul(src1_lo, src2_hi, BC, MAX); // B * C
+    amx_matmul(src1_lo, src2_lo, BD, MAX); // B * D
 
-    // Compute dot-product of bytes in tiles 
-    _tile_dpbuud (1, 2, 3);
+    // init mem for combining buffers
+    uint32_t hi_term[MAX/4] __attribute__((aligned(64)));
+    uint32_t lo_term[MAX/4] __attribute__((aligned(64)));
 
-    // Store low bit tile data to memory
-    _tile_stored (1, amx_res_32_low_bits, STRIDE);
+    // hi term
+    add_buffer32(BC, AD, hi_term, MAX/4);
+    left_shift_buffer32(hi_term, MAX/4, 8); // shift left by 8
 
-    // Load high bit data into AMX tiles from memory
-    _tile_loadd (2, src1_high_bits, STRIDE);
-    _tile_loadd (3, src2_high_bits, STRIDE);
-    _tile_loadd (1, amx_res_32_high_bits, STRIDE);
+    // lo term
+    left_shift_buffer32(AC, MAX/4, 16); // shift left by 16
+    add_buffer32(AC, BD, lo_term, MAX/4); // combine
 
-    // Compute dot-product of bytes in tiles
-    _tile_dpbuud (1, 2, 3);
+    // recombine
+    add_buffer32(hi_term, lo_term, res, MAX/4);
+}
 
-    // Store high bit tile data to memory
-    _tile_stored (1, amx_res_32_high_bits, STRIDE);
-
-    // Recombine low and high bits into final result
-    bit_recombine(amx_res_32_low_bits, amx_res_32_high_bits, res, MAX/4);
-
-
+/* Reduce uint32_t to 0-256 inclusive */
+inline void modular_reduction(uint32_t *buf, uint32_t modulus, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        buf[i] %= modulus;
+    }
 }
 
 int main(){
